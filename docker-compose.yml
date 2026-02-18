@@ -1,0 +1,14 @@
+services:
+  backup:
+    build: .
+    image: go-backup:latest
+    container_name: go-backup-app
+    stdin_open: true
+    tty: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    volumes:
+      - ./backups:/app/backups
+      - .env:/app/.env

@@ -1,0 +1,5 @@
+*.exe
+*.zip
+*.sql
+.env
+backups
