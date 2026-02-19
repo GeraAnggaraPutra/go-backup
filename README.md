@@ -10,6 +10,7 @@ A robust and interactive CLI-based utility built with Go, designed to streamline
 - **Flexible Configuration**: Supports automated execution via `.env` files or manual input for one-off tasks.
 - **Cron Job Integration**: Built-in support for scheduled backups using Cron expressions (e.g., `0 0 * * *` for daily midnight backups).
 - **Instant Telegram Notifications**: Receive real-time backup status reports (Success/Failure) directly to your Telegram account or group, complete with file details and timestamps.
+- **Real-time Management Dashboard**: A modern web interface to monitor live statistics, manage archives with batch operations, and track server disk capacity via a responsive, auto-refreshing UI.
 
 ---
 
@@ -60,7 +61,7 @@ You can run the tool directly using the Go command.
 If you run the command without a configured `.env` file (or choose "Manual Input" when prompted), the tool will guide you through the process.
 
 ```bash
-go run main.go backup
+make backup
 ```
 *Follow the on-screen prompts to select database type, credentials, and tables.*
 
@@ -68,7 +69,7 @@ go run main.go backup
 If a `.env` file is present, the tool will automatically load the configuration and start the backup.
 
 ```bash
-go run main.go backup
+make backup
 ```
 
 ### Method 2: Running with Docker
@@ -77,8 +78,8 @@ Docker is the recommended way to run the tool in production or environments with
 **1. Build and Run with Docker Compose**
 The project includes a `docker-compose.yml` that handles the setup, including volume mapping for your backup files.
 ```bash
-docker compose build
-docker compose run --rm backup
+make docker-build
+make docker-backup
 ```
 
 **2. Check Backups**
@@ -87,6 +88,26 @@ Backup files will be generated in the `./backups` directory on your host machine
 **Docker Configuration Notes:**
 -   Ensure your `.env` file points to the correct database host. If your database is running on the host machine, use `host.docker.internal` as the `DB_HOST`.
 
-### 2. Output Location
+### 2. Dashboard
+The web dashboard allows you to manage your backups visually. You can run it with a custom port or use the system default.
+
+**1. Run Dashboard**
+```bash
+# Run on default port (8080)
+make dashboard
+
+# Run on a specific port
+make dashboard port=9000
+
+# Docker
+make docker-dashboard port=9000 (optional custom port)
+```
+
+**2. Accessing the UI**
+Once the command is running, open your browser and navigate to:
+- Default: http://localhost:8080
+- Custom: http://localhost:9000 (or whichever port you specified)
+
+### 3. Output Location
 All generated backup files will be found in the following directory:
 `./backups/`

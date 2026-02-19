@@ -12,3 +12,13 @@ services:
     volumes:
       - ./backups:/app/backups
       - .env:/app/.env
+
+  dashboard:
+    build: .
+    image: go-backup:latest
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./backups:/app/backups
+      - .env:/app/.env
+    command: ["dashboard", "--port", "8080"]

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go-Backup Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .modal-active { display: flex !important; }
+        /* Style Checkbox Custom */
+        input[type="checkbox"] { accent-color: #3b82f6; width: 1.2rem; height: 1.2rem; cursor: pointer; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-4xl font-extrabold text-blue-400 tracking-tight flex items-center gap-3">
+                    <span class="text-5xl">🗄️</span> Go-Backup
+                </h1>
+                <p class="text-gray-500 text-sm mt-1 font-medium italic" id="realtime-clock">Initializing clock...</p>
+            </div>
+            <div class="flex items-center bg-green-900/10 border border-green-500/30 px-5 py-2.5 rounded-2xl">
+                <span class="relative flex h-3 w-3 mr-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <span class="text-green-400 text-xs font-bold uppercase tracking-widest">System Active</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-gray-800/50 backdrop-blur-sm p-6 rounded-3xl border border-gray-700/50">
+                <div class="text-gray-500 text-xs uppercase font-bold mb-2">Total Backups</div>
+                <div id="stat-count" class="text-4xl font-black text-white">-</div>
+            </div>
+            <div class="bg-gray-800/50 backdrop-blur-sm p-6 rounded-3xl border border-gray-700/50 border-l-4 border-l-blue-500">
+                <div class="text-gray-500 text-xs uppercase font-bold mb-2">Total Storage</div>
+                <div id="stat-size" class="text-4xl font-black text-white">-</div>
+            </div>
+            <div class="bg-gray-800/50 backdrop-blur-sm p-6 rounded-3xl border border-gray-700/50">
+                <div class="text-gray-500 text-xs uppercase font-bold mb-2">Latest Sync</div>
+                <div id="stat-last" class="text-sm font-mono text-blue-300 truncate mt-2">-</div>
+            </div>
+        </div>
+
+        <div class="mb-6 flex flex-col md:flex-row gap-4 items-center justify-between bg-gray-800/30 p-4 rounded-2xl border border-gray-700/30">
+            <div class="relative w-full md:w-96 group">
+                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">🔍</div>
+                <input type="text" id="search-input" placeholder="Search backups..." 
+                    class="w-full bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-xl pl-10 p-3 focus:ring-2 focus:ring-blue-500 outline-none">
+            </div>
+            
+            <div class="flex gap-2 w-full md:w-auto">
+                <button id="btn-delete-selected" onclick="openBatchDeleteModal('selected')" class="flex-1 md:flex-none hidden bg-orange-600/20 hover:bg-orange-600 text-orange-500 hover:text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-all border border-orange-600/30">
+                    🗑️ DELETE SELECTED (<span id="selected-count">0</span>)
+                </button>
+                <button onclick="openBatchDeleteModal('all')" class="flex-1 md:flex-none bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-all border border-red-600/30">
+                    🔥 DELETE ALL
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-gray-800/40 rounded-3xl shadow-2xl overflow-hidden border border-gray-700/50">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="bg-gray-700/30 text-gray-400 uppercase text-[10px] font-black tracking-widest">
+                        <tr>
+                            <th class="px-6 py-5 w-10">
+                                <input type="checkbox" id="select-all" onclick="toggleSelectAll()">
+                            </th>
+                            <th class="px-6 py-5">File Name</th>
+                            <th class="px-6 py-5">Size</th>
+                            <th class="px-6 py-5">Created At</th>
+                            <th class="px-8 py-5 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="backup-list" class="divide-y divide-gray-700/30 text-sm italic text-gray-500">
+                        <tr><td colspan="5" class="px-8 py-20 text-center">Loading archives...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="bg-gray-900/50 px-8 py-4 flex items-center justify-between border-t border-gray-700/30">
+                <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">
+                    Showing <span id="page-range">0-0</span> of <span id="total-results">0</span>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="changePage(-1)" id="btn-prev" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all">Previous</button>
+                    <div id="page-numbers" class="flex gap-1"></div>
+                    <button onclick="changePage(1)" id="btn-next" class="px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all">Next</button>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-10 text-center">
+            <p class="text-gray-600 text-[10px] uppercase tracking-[0.3em] font-bold">Real-time Dashboard & Backup</p>
+            <p class="text-blue-500/60 text-[9px] uppercase tracking-[0.1em] mt-2 font-medium">This dashboard auto-refreshes every 20 seconds</p>
+        </footer>
+    </div>
+
+    <div id="delete-modal" class="hidden fixed inset-0 bg-black/90 backdrop-blur-md z-50 items-center justify-center p-4">
+        <div class="bg-gray-800 border border-gray-700 p-8 rounded-3xl max-w-sm w-full text-center">
+            <div class="text-5xl mb-4">⚠️</div>
+            <h3 id="modal-title" class="text-xl font-bold text-white mb-2">Delete Backup?</h3>
+            <p id="modal-desc" class="text-gray-400 text-sm mb-6">This action is permanent.</p>
+            <div class="flex gap-3">
+                <button onclick="closeModal()" class="flex-1 px-4 py-3 bg-gray-700 text-white rounded-xl font-bold">Cancel</button>
+                <button id="confirm-delete-btn" class="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-bold">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allBackups = [];
+        let currentPage = 1;
+        const rowsPerPage = 10;
+        let selectedFiles = new Set();
+        let batchMode = ""; // "single", "selected", "all"
+        let singleFileName = "";
+
+        // --- Core Functions ---
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('realtime-clock').innerText = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        async function fetchDashboardData() {
+            try {
+                const [resStats, resFiles] = await Promise.all([
+                    fetch('/api/stats'),
+                    fetch('/api/backups')
+                ]);
+                const stats = await resStats.json();
+                allBackups = await resFiles.json();
+
+                document.getElementById('stat-count').innerText = stats.total_files;
+                document.getElementById('stat-size').innerText = stats.total_size;
+                document.getElementById('stat-last').innerText = stats.last_backup;
+
+                renderTable();
+            } catch (error) { console.error("Sync Error:", error); }
+        }
+
+        // --- Table & Pagination Logic ---
+        function renderTable() {
+            const list = document.getElementById('backup-list');
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const filteredData = allBackups.filter(file => file.name.toLowerCase().includes(searchTerm));
+
+            const totalResults = filteredData.length;
+            const totalPages = Math.ceil(totalResults / rowsPerPage) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            const start = (currentPage - 1) * rowsPerPage;
+            const end = start + rowsPerPage;
+            const paginatedData = filteredData.slice(start, end);
+
+            // Update UI Counters
+            document.getElementById('total-results').innerText = totalResults;
+            document.getElementById('page-range').innerText = totalResults > 0 ? `${start + 1}-${Math.min(end, totalResults)}` : "0-0";
+            document.getElementById('btn-prev').disabled = currentPage === 1;
+            document.getElementById('btn-next').disabled = currentPage === totalPages;
+
+            if (paginatedData.length === 0) {
+                list.innerHTML = `<tr><td colspan="5" class="px-8 py-20 text-center text-gray-500 italic">No archives found.</td></tr>`;
+                return;
+            }
+
+            list.innerHTML = paginatedData.map(file => `
+                <tr class="hover:bg-gray-700/20 transition-all group ${selectedFiles.has(file.name) ? 'bg-blue-500/5' : ''}">
+                    <td class="px-6 py-5">
+                        <input type="checkbox" class="file-checkbox" data-name="${file.name}" 
+                            ${selectedFiles.has(file.name) ? 'checked' : ''} onchange="toggleFileSelection('${file.name}')">
+                    </td>
+                    <td class="px-6 py-5 font-mono font-semibold text-gray-200">${file.name}</td>
+                    <td class="px-6 py-5"><span class="bg-gray-900/50 text-blue-400 text-xs px-2 py-1 rounded border border-gray-700">${file.size}</span></td>
+                    <td class="px-6 py-5 text-gray-500 font-mono text-xs">${file.time}</td>
+                    <td class="px-8 py-5 text-right flex justify-end gap-2">
+                        <a href="/api/download/${file.name}" class="p-2 bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white rounded-lg transition-all">📥</a>
+                        <button onclick="openSingleDeleteModal('${file.name}')" class="p-2 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white rounded-lg transition-all">🗑️</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            updateSelectedUI();
+        }
+
+        function toggleFileSelection(name) {
+            if (selectedFiles.has(name)) selectedFiles.delete(name);
+            else selectedFiles.add(name);
+            updateSelectedUI();
+            renderTable();
+        }
+
+        function toggleSelectAll() {
+            const isAllSelected = document.getElementById('select-all').checked;
+            if (isAllSelected) {
+                allBackups.forEach(f => selectedFiles.add(f.name));
+            } else {
+                selectedFiles.clear();
+            }
+            renderTable();
+        }
+
+        function updateSelectedUI() {
+            const count = selectedFiles.size;
+            document.getElementById('selected-count').innerText = count;
+            document.getElementById('btn-delete-selected').style.display = count > 0 ? 'inline-flex' : 'none';
+            document.getElementById('select-all').checked = count > 0 && count === allBackups.length;
+        }
+
+        function changePage(dir) {
+            currentPage += dir;
+            renderTable();
+        }
+
+        function openSingleDeleteModal(name) {
+            batchMode = "single";
+            singleFileName = name;
+            showModal("Delete File?", `Permanently remove ${name}?`);
+        }
+
+        function openBatchDeleteModal(type) {
+            batchMode = type;
+            if (type === 'selected') showModal("Delete Selected?", `Delete ${selectedFiles.size} selected items?`);
+            else showModal("Delete All?", "⚠️ THIS WILL WIPE ALL BACKUPS FROM THE SERVER!");
+        }
+
+        function showModal(title, desc) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-desc').innerText = desc;
+            document.getElementById('delete-modal').classList.add('modal-active');
+        }
+
+        function closeModal() { document.getElementById('delete-modal').classList.remove('modal-active'); }
+
+        document.getElementById('confirm-delete-btn').onclick = async () => {
+            const btn = document.getElementById('confirm-delete-btn');
+            btn.innerText = "Processing...";
+            btn.disabled = true;
+
+            try {
+                if (batchMode === "single") {
+                    await fetch(`/api/delete/${singleFileName}`, { method: 'DELETE' });
+                } else if (batchMode === "selected") {
+                    for (let name of selectedFiles) {
+                        await fetch(`/api/delete/${name}`, { method: 'DELETE' });
+                    }
+                } else if (batchMode === "all") {
+                    for (let file of allBackups) {
+                        await fetch(`/api/delete/${file.name}`, { method: 'DELETE' });
+                    }
+                }
+                selectedFiles.clear();
+                await fetchDashboardData();
+            } catch (e) { alert("Failed to delete some files"); }
+
+            btn.innerText = "Confirm";
+            btn.disabled = false;
+            closeModal();
+        };
+
+        document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderTable(); });
+        window.onload = () => {
+            updateClock();
+            fetchDashboardData();
+            setInterval(updateClock, 1000);
+            setInterval(fetchDashboardData, 20000);
+        };
+    </script>
+</body>
+</html>

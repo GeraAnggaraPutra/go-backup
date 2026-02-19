@@ -24,4 +24,6 @@ ENV TZ=Asia/Jakarta
 
 RUN chmod +x db-backup
 
-ENTRYPOINT ["./db-backup", "backup"]
+ENTRYPOINT ["./db-backup"]
+
+CMD ["backup"]
