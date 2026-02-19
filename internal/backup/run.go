@@ -6,28 +6,32 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/GeraAnggaraPutra/go-backup/internal/config"
 	"github.com/GeraAnggaraPutra/go-backup/internal/constant"
 	"github.com/GeraAnggaraPutra/go-backup/internal/database"
+	"github.com/GeraAnggaraPutra/go-backup/internal/notification"
 	"github.com/GeraAnggaraPutra/go-backup/internal/zipper"
 
 	"github.com/robfig/cron/v3"
 )
 
 type Config struct {
-	DBType   string
-	Host     string
-	Port     int
-	Username string
-	Password string
-	DBName   string
-	Output   string
-	Tables   []string
-	Schedule string
+	DBType    string
+	Host      string
+	Port      int
+	Username  string
+	Password  string
+	DBName    string
+	Output    string
+	Tables    []string
+	Schedule  string
+	ENVConfig config.Config
 }
 
 const defaultWorkerCount = 4
@@ -46,6 +50,50 @@ func Run(cfg Config) error {
 		cancel()
 	}()
 
+	processAction := func(currentCfg Config) error {
+		err := executeBackup(ctx, currentCfg)
+
+		finishTime := time.Now().Format("2006-01-02 15:04:05")
+		hasTele := currentCfg.ENVConfig.TelegramToken != "" && currentCfg.ENVConfig.TelegramChatID != ""
+
+		if err != nil {
+			if hasTele {
+				msg := fmt.Sprintf(constant.TelegramErrorTemplate,
+					currentCfg.DBName,
+					err.Error(),
+					finishTime,
+				)
+
+				if errNotif := notification.SendToTelegram(currentCfg.ENVConfig.TelegramToken, currentCfg.ENVConfig.TelegramChatID, "", msg); errNotif != nil {
+					fmt.Printf("\n%s[Notification] Failed to send Telegram error notification: %v%s\n", constant.ColorRed, errNotif, constant.ColorReset)
+				} else {
+					fmt.Printf("%s[Notification] Error notification sent to Telegram successfully!%s\n", constant.ColorGreen, constant.ColorReset)
+				}
+			}
+
+			return err
+		}
+
+		if hasTele {
+			fileNameOnly := filepath.Base(currentCfg.Output)
+
+			msg := fmt.Sprintf(constant.TelegramMessageTemplate,
+				currentCfg.DBName,
+				fileNameOnly,
+				finishTime,
+			)
+
+			if errNotif := notification.SendToTelegram(currentCfg.ENVConfig.TelegramToken, currentCfg.ENVConfig.TelegramChatID, currentCfg.Output, msg); errNotif != nil {
+				fmt.Printf("\n%s[Notification] Failed to send Telegram: %v%s\n", constant.ColorRed, errNotif, constant.ColorReset)
+			} else {
+				fmt.Printf("%s[Notification] Backup sent to Telegram successfully!%s\n", constant.ColorGreen, constant.ColorReset)
+			}
+		}
+
+		fmt.Printf("%s[System] Backup completed successfully!%s\n", constant.ColorGreen, constant.ColorReset)
+		return nil
+	}
+
 	if cfg.Schedule != "" {
 		c := cron.New()
 		var entryID cron.EntryID
@@ -56,36 +104,23 @@ func Run(cfg Config) error {
 			fmt.Printf("\n%s[Cron] [Triggered] Execution Time: %s%s\n",
 				constant.ColorPurple, now.Format("2006-01-02 15:04:05"), constant.ColorReset)
 
-			timestamp := now.Format("20060102_150405")
 			currentCfg := cfg
-			cleanOutput := cfg.Output
-
-			if len(cleanOutput) >= 16 && isDefaultTimestamp(cleanOutput[:15]) {
-				parts := strings.SplitN(cleanOutput, "_", 3)
-				if len(parts) >= 3 {
-					cleanOutput = parts[2]
-				}
-			}
-
-			currentCfg.Output = fmt.Sprintf("%s_%s", timestamp, cleanOutput)
+			currentCfg.Output = generateTimestampedOutput(cfg.Output, now)
 
 			fmt.Printf("%s[Cron] Starting scheduled backup: %s%s\n",
 				constant.ColorBlue, currentCfg.Output, constant.ColorReset)
 
-			if err := executeBackup(ctx, currentCfg); err != nil {
+			if err := processAction(currentCfg); err != nil {
 				if ctx.Err() == context.Canceled {
-					fmt.Printf("%s[Cron] Backup aborted by user.%s\n",
-						constant.ColorRed, constant.ColorReset)
+					fmt.Printf("%s[Cron] Backup aborted by user.%s\n", constant.ColorRed, constant.ColorReset)
 				} else {
-					fmt.Printf("%s[Cron] Backup failed: %v%s\n",
-						constant.ColorRed, err, constant.ColorReset)
+					fmt.Printf("%s[Cron] Backup failed: %v%s\n", constant.ColorRed, err, constant.ColorReset)
 				}
 			} else {
 				nextRun := c.Entry(entryID).Next
 				fmt.Printf("%s[Cron] Task finished. Next run scheduled at: %s%s\n",
 					constant.ColorGray, nextRun.Format("2006-01-02 15:04:05"), constant.ColorReset)
 			}
-
 		})
 
 		if err != nil {
@@ -93,42 +128,24 @@ func Run(cfg Config) error {
 		}
 
 		c.Start()
-
-		initialNext := c.Entry(entryID).Next
-		fmt.Printf("%s[Cron] System Active! Schedule: %s%s\n",
-			constant.ColorGreen, cfg.Schedule, constant.ColorReset)
-		fmt.Printf("%s[Cron] First scheduled run will be at: %s%s\n",
-			constant.ColorCyan, initialNext.Format("2006-01-02 15:04:05"), constant.ColorReset)
+		fmt.Printf("%s[Cron] System Active! Schedule: %s%s\n", constant.ColorGreen, cfg.Schedule, constant.ColorReset)
+		fmt.Printf("%s[Cron] First scheduled run will be at: %s%s\n", constant.ColorCyan, c.Entry(entryID).Next.Format("2006-01-02 15:04:05"), constant.ColorReset)
 		fmt.Println("[Cron] Press Ctrl+C to stop the application.")
 
 		<-ctx.Done()
+		fmt.Printf("%s[Cron] Stopping scheduler...%s\n", constant.ColorYellow, constant.ColorReset)
 
-		fmt.Printf("%s[Cron] Stopping scheduler...%s\n",
-			constant.ColorYellow, constant.ColorReset)
-		ctxStop := c.Stop()
-		<-ctxStop.Done()
+		stopCtx := c.Stop()
+		<-stopCtx.Done()
 
-		fmt.Printf("%s[Cron] Shutting down. Goodbye!%s\n",
-			constant.ColorRed, constant.ColorReset)
+		fmt.Printf("%s[Cron] Scheduler stopped. Exiting application.%s\n", constant.ColorGreen, constant.ColorReset)
+		fmt.Printf("%s[System] Shutdown complete. Goodbye!%s\n", constant.ColorRed, constant.ColorReset)
+
 		return nil
 	}
 
-	fmt.Printf("%s[System] Running one-time backup...%s\n",
-		constant.ColorBlue, constant.ColorReset)
-	err := executeBackup(ctx, cfg)
-	if err != nil {
-		if ctx.Err() == context.Canceled {
-			fmt.Printf("\n%s[System] Backup cancelled by user.%s\n",
-				constant.ColorRed, constant.ColorReset)
-			return nil
-		}
-
-		return err
-	}
-
-	fmt.Printf("%s[System] Backup completed successfully!%s\n",
-		constant.ColorGreen, constant.ColorReset)
-	return nil
+	fmt.Printf("%s[System] Running one-time backup...%s\n", constant.ColorBlue, constant.ColorReset)
+	return processAction(cfg)
 }
 
 func executeBackup(ctx context.Context, cfg Config) error {
@@ -252,4 +269,29 @@ func isDefaultTimestamp(s string) bool {
 	}
 
 	return true
+}
+
+func generateTimestampedOutput(originalOutput string, now time.Time) string {
+	timestamp := now.Format("20060102_150405")
+
+	// Separate folder path and file name
+	pathSeparatorIdx := strings.LastIndex(originalOutput, "/")
+	folderPath := ""
+	fileName := originalOutput
+
+	if pathSeparatorIdx != -1 {
+		folderPath = originalOutput[:pathSeparatorIdx+1] // example: "backups/"
+		fileName = originalOutput[pathSeparatorIdx+1:]   // example: "backup.zip"
+	}
+
+	// If the file name starts with a default timestamp pattern, remove it before adding the new timestamp
+	if len(fileName) >= 16 && isDefaultTimestamp(fileName[:15]) {
+		parts := strings.SplitN(fileName, "_", 3)
+		if len(parts) >= 3 {
+			fileName = parts[2]
+		}
+	}
+
+	// Construct the new output path with the current timestamp
+	return fmt.Sprintf("%s%s_%s", folderPath, timestamp, fileName)
 }

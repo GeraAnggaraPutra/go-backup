@@ -9,6 +9,7 @@ A robust and interactive CLI-based utility built with Go, designed to streamline
 - **Automated ZIP Compression**: Dumps are instantly compressed into ZIP format to save disk space and improve portability.
 - **Flexible Configuration**: Supports automated execution via `.env` files or manual input for one-off tasks.
 - **Cron Job Integration**: Built-in support for scheduled backups using Cron expressions (e.g., `0 0 * * *` for daily midnight backups).
+-- **Instant Telegram Notifications**: Receive real-time backup status reports (Success/Failure) directly to your Telegram account or group, complete with file details and timestamps.
 
 ---
 
@@ -19,7 +20,7 @@ A robust and interactive CLI-based utility built with Go, designed to streamline
 3. **Selection**: You interactively select the tables you wish to include in the backup.
 4. **Execution**: The tool executes the dump process for the chosen tables.
 5. **Archiving**: The resulting data is bundled into a `.zip` file and moved to the designated output folder.
-
+6. **Notification**: Upon completion or if an error occurs mid-process, the bot dispatches a concise report using professional HTML formatting to Telegram.
 ---
 
 ## 🛠️ Usage
@@ -45,6 +46,10 @@ DB_TABLES=table1,table2
 OUTPUT_FILE=backup.zip
 # Empty string means no schedule, otherwise use cron format
 SCHEDULE="0 0 * * *"
+
+# Telegram Notification (Optional)
+TELEGRAM_TOKEN=123456789:ABCDefghIJKLmn-Opqrst
+TELEGRAM_CHAT_ID=987654321
 ```
 
 ### Method 1: Running Manually (Go)

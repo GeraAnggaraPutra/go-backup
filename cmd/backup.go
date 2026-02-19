@@ -66,7 +66,16 @@ var backupCmd = &cobra.Command{
 			return err
 		}
 
-		return backup.Run(cfg)
+		err = backup.Run(cfg)
+		if err != nil {
+			if err == context.Canceled {
+				fmt.Printf("%s[System] Shutdown complete. Goodbye!%s\n", constant.ColorRed, constant.ColorReset)
+				return nil
+			}
+
+			return err
+		}
+		return nil
 	},
 }
 
@@ -79,10 +88,10 @@ func Execute() error {
 func getConfigFromEnv() (backup.Config, error) {
 	fmt.Printf("%s[System] Validating connection and tables from .env...%s\n", constant.ColorCyan, constant.ColorReset)
 
-	dbConfig := config.LoadConfig()
-	driver := getDatabaseDriver(dbConfig.DBType)
+	envConfig := config.LoadConfig()
+	driver := getDatabaseDriver(envConfig.DBType)
 
-	conn, err := connectToDatabase(driver, dbConfig.DBHost, dbConfig.DBPort, dbConfig.DBUser, dbConfig.DBPassword, dbConfig.DBName)
+	conn, err := connectToDatabase(driver, envConfig.DBHost, envConfig.DBPort, envConfig.DBUser, envConfig.DBPassword, envConfig.DBName)
 	if err != nil {
 		exitWithError("Connection failed using .env credentials", err)
 	}
@@ -96,25 +105,26 @@ func getConfigFromEnv() (backup.Config, error) {
 		exitWithError("Failed to fetch table list", err)
 	}
 
-	finalTables, err := filterTables(existingTables, dbConfig.DBTables)
+	finalTables, err := filterTables(existingTables, envConfig.DBTables)
 	if err != nil {
 		exitWithError("Table validation failed", err)
 	}
 
-	output := getOutputFile(dbConfig.OutputFile)
+	output := getOutputFile(envConfig.OutputFile)
 
 	fmt.Printf("%s[System] Validation successful. Starting backup...%s\n", constant.ColorGreen, constant.ColorReset)
 
 	return backup.Config{
-		DBType:   dbConfig.DBType,
-		Host:     dbConfig.DBHost,
-		Port:     dbConfig.DBPort,
-		Username: dbConfig.DBUser,
-		Password: dbConfig.DBPassword,
-		DBName:   dbConfig.DBName,
-		Output:   output,
-		Tables:   finalTables,
-		Schedule: dbConfig.Schedule,
+		DBType:    envConfig.DBType,
+		Host:      envConfig.DBHost,
+		Port:      envConfig.DBPort,
+		Username:  envConfig.DBUser,
+		Password:  envConfig.DBPassword,
+		DBName:    envConfig.DBName,
+		Output:    output,
+		Tables:    finalTables,
+		Schedule:  envConfig.Schedule,
+		ENVConfig: envConfig,
 	}, nil
 }
 
@@ -126,6 +136,7 @@ func getConfigFromInput() (backup.Config, error) {
 		username string
 		password string
 		dbName   string
+		envCfg   config.Config
 	)
 
 	survey.AskOne(&survey.Select{
@@ -203,16 +214,33 @@ func getConfigFromInput() (backup.Config, error) {
 
 	output := getOutputFile(outputInput)
 
+	sendTelegram := false
+	survey.AskOne(&survey.Confirm{
+		Message: "Send notification to Telegram?",
+		Default: false,
+	}, &sendTelegram)
+
+	if sendTelegram {
+		survey.AskOne(&survey.Input{
+			Message: "Telegram Token:",
+		}, &envCfg.TelegramToken)
+
+		survey.AskOne(&survey.Input{
+			Message: "Telegram Chat ID:",
+		}, &envCfg.TelegramChatID)
+	}
+
 	return backup.Config{
-		DBType:   dbType,
-		Host:     host,
-		Port:     port,
-		Username: username,
-		Password: password,
-		DBName:   dbName,
-		Output:   output,
-		Tables:   selectedTables,
-		Schedule: cronSchedule,
+		DBType:    dbType,
+		Host:      host,
+		Port:      port,
+		Username:  username,
+		Password:  password,
+		DBName:    dbName,
+		Output:    output,
+		Tables:    selectedTables,
+		Schedule:  cronSchedule,
+		ENVConfig: envCfg,
 	}, nil
 }
 
@@ -266,18 +294,21 @@ func filterTables(existingTables []string, envTablesStr string) ([]string, error
 
 func getOutputFile(input string) string {
 	output := strings.TrimSpace(input)
-	defaultOutput := time.Now().Format("20060102_150405") + "_backup.zip"
 
 	if output == "" {
-		return defaultOutput
+		output = time.Now().Format("20060102_150405") + "_backup.zip"
 	}
 
-	if !strings.HasSuffix(output, ".zip") {
-		return output + ".zip"
+	if !strings.HasSuffix(strings.ToLower(output), ".zip") {
+		output = output + ".zip"
 	}
 
 	if !strings.HasPrefix(output, "backups/") {
 		output = "backups/" + output
+	}
+
+	if _, err := os.Stat("backups"); os.IsNotExist(err) {
+		_ = os.MkdirAll("backups", 0755)
 	}
 
 	return output

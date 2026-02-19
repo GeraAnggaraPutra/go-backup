@@ -38,7 +38,6 @@ func startRenderer(ctx context.Context, progress map[string]*TableProgress, mu *
 				}
 			}
 
-			// sort with unfinished tables first, then by name
 			sort.Slice(keys, func(i, j int) bool {
 				if progress[keys[i]].Done != progress[keys[j]].Done {
 					return !progress[keys[i]].Done
@@ -48,9 +47,8 @@ func startRenderer(ctx context.Context, progress map[string]*TableProgress, mu *
 
 			isFinished := completedCount == total
 
-			// Clear previous frame
 			if renderedLines > 0 {
-				fmt.Printf(constant.CursorUp, renderedLines)
+				fmt.Printf("\033[%dA", renderedLines)
 			}
 
 			var frame strings.Builder
@@ -59,62 +57,49 @@ func startRenderer(ctx context.Context, progress map[string]*TableProgress, mu *
 				sp = constant.ColorGreen + constant.IconSuccess + constant.ColorReset
 			}
 
-			frame.WriteString(fmt.Sprintf("\r%s%s %sDATABASE BACKUP SYSTEM%s [%d/%d]\n",
+			frame.WriteString(fmt.Sprintf("%s%s %sDATABASE BACKUP SYSTEM%s [%d/%d]\n",
 				constant.ClearLine, sp, constant.ColorBold+constant.ColorCyan, constant.ColorReset, completedCount, total))
 
 			currentLines := 1
-			displayedRows := 0
-			maxRows := 20
-			if isFinished {
-				maxRows = total
-			}
+			maxRows := 15
+			displayed := 0
 
 			for _, k := range keys {
+				if displayed >= maxRows && !isFinished {
+					break
+				}
 				p := progress[k]
-				if displayedRows < maxRows {
-					status := constant.ColorYellow + constant.IconRunning + " Running" + constant.ColorReset
+				status := constant.ColorYellow + "Running" + constant.ColorReset
+				if p.Done {
+					status = constant.ColorGreen + "Done   " + constant.ColorReset
+				}
 
-					if p.Done {
-						status = constant.ColorGreen + constant.IconSuccess + " Done   " + constant.ColorReset
-					}
+				bar := buildCyberBar(p.Done, p.Bytes, frameIdx)
+				size := formatSize(p.Bytes)
 
-					bar := buildCyberBar(p.Done, p.Bytes, frameIdx)
-					size := formatSize(p.Bytes)
-
-					// calculating speed in MB/s
-					speed := 0.0
-					if p.Bytes > 0 {
-						elapsed := time.Since(p.StartTime).Seconds()
-						if elapsed < 0.001 {
-							elapsed = 0.001
-						}
-
+				speed := 0.0
+				if p.Bytes > 0 {
+					elapsed := time.Since(p.StartTime).Seconds()
+					if elapsed > 0 {
 						speed = float64(p.Bytes) / elapsed / 1024 / 1024
 					}
-
-					frame.WriteString(fmt.Sprintf("\r%s   %-30s %s   %-10s %s   %6.2f MB/s\n",
-						constant.ClearLine,
-						truncateString(p.Table, 30),
-						bar,
-						size,
-						status,
-						speed))
-
-					currentLines++
-					displayedRows++
 				}
+
+				frame.WriteString(fmt.Sprintf("%s  %-30s %s  %-10s %s  %6.2f MB/s\n",
+					constant.ClearLine, truncateString(p.Table, 30), bar, size, status, speed))
+				currentLines++
+				displayed++
 			}
 
-			// If there are more tables than displayed, show a summary line
-			if total > displayedRows && !isFinished {
-				frame.WriteString(fmt.Sprintf("\r%s   %s... and %d other tables in queue ...%s\n",
-					constant.ClearLine, constant.ColorGray, total-displayedRows, constant.ColorReset))
+			if total > displayed && !isFinished {
+				frame.WriteString(fmt.Sprintf("%s  %s... and %d other tables ...%s\n",
+					constant.ClearLine, constant.ColorGray, total-displayed, constant.ColorReset))
 				currentLines++
 			}
 
-			// Progress summary line
+			// Footer
 			percent := (completedCount * 100) / total
-			frame.WriteString(fmt.Sprintf("\r%s\n\r%s%sProgress: %d%% | Time: %s | Tables: %d/%d%s\n",
+			frame.WriteString(fmt.Sprintf("%s\n%s%sProgress: %d%% | Time: %s | %d/%d Tables%s\n",
 				constant.ClearLine, constant.ClearLine, constant.ColorBold+constant.ColorBlue,
 				percent, time.Since(start).Round(time.Second), completedCount, total, constant.ColorReset))
 			currentLines += 2
@@ -124,8 +109,8 @@ func startRenderer(ctx context.Context, progress map[string]*TableProgress, mu *
 			frameIdx++
 
 			if isFinished {
-				fmt.Printf("\r%s\n%s%s✨ ALL BACKUPS COMPLETED SUCCESSFULLY IN %v ✨%s\n",
-					constant.ClearLine, constant.ColorBold, constant.ColorGreen, time.Since(start).Round(time.Second), constant.ColorReset)
+				fmt.Printf("\n%s%s✨ ALL BACKUPS COMPLETED SUCCESSFULLY IN %v ✨%s\n",
+					constant.ColorBold, constant.ColorGreen, time.Since(start).Round(time.Second), constant.ColorReset)
 				mu.Unlock()
 				return
 			}

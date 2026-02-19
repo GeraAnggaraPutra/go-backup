@@ -8,15 +8,17 @@ import (
 )
 
 type Config struct {
-	DBType     string
-	DBHost     string
-	DBPort     int
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBTables   string
-	OutputFile string
-	Schedule string
+	DBType         string
+	DBHost         string
+	DBPort         int
+	DBUser         string
+	DBPassword     string
+	DBName         string
+	DBTables       string
+	OutputFile     string
+	Schedule       string
+	TelegramToken  string
+	TelegramChatID string
 }
 
 func LoadConfig() (cfg Config) {
@@ -31,6 +33,8 @@ func LoadConfig() (cfg Config) {
 	cfg.DBTables = getEnv("DB_TABLES")
 	cfg.OutputFile = getEnv("OUTPUT_FILE")
 	cfg.Schedule = getEnv("SCHEDULE")
+	cfg.TelegramToken = getEnv("TELEGRAM_TOKEN")
+	cfg.TelegramChatID = getEnv("TELEGRAM_CHAT_ID")
 
 	return
 }
