@@ -9,7 +9,7 @@ A robust and interactive CLI-based utility built with Go, designed to streamline
 - **Automated ZIP Compression**: Dumps are instantly compressed into ZIP format to save disk space and improve portability.
 - **Flexible Configuration**: Supports automated execution via `.env` files or manual input for one-off tasks.
 - **Cron Job Integration**: Built-in support for scheduled backups using Cron expressions (e.g., `0 0 * * *` for daily midnight backups).
--- **Instant Telegram Notifications**: Receive real-time backup status reports (Success/Failure) directly to your Telegram account or group, complete with file details and timestamps.
+- **Instant Telegram Notifications**: Receive real-time backup status reports (Success/Failure) directly to your Telegram account or group, complete with file details and timestamps.
 
 ---
 
