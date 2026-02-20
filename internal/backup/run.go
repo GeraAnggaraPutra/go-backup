@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/GeraAnggaraPutra/go-backup/helper"
 	"github.com/GeraAnggaraPutra/go-backup/internal/config"
 	"github.com/GeraAnggaraPutra/go-backup/internal/constant"
 	"github.com/GeraAnggaraPutra/go-backup/internal/database"
@@ -50,12 +51,27 @@ func Run(cfg Config) error {
 	processAction := func(currentCfg Config) error {
 		err := executeBackup(ctx, currentCfg)
 		if err != nil {
-			sendTelegramNotification(currentCfg, err)
+			helper.SendTelegramNotification(helper.UploadTelegramRequest{
+				TelegramEnabled: currentCfg.ENVConfig.TelegramEnabled,
+				Output:          currentCfg.Output,
+				DBName:          currentCfg.DBName,
+				TelegramToken:   currentCfg.ENVConfig.TelegramToken,
+				TelegramChatID:  currentCfg.ENVConfig.TelegramChatID,
+			}, err)
 			return err
 		}
 
-		uploadToGCS(ctx, currentCfg)
-		sendTelegramNotification(currentCfg, nil)
+		helper.UploadToGCS(ctx, helper.UploadGCSRequest{
+			GCSEnabled: currentCfg.ENVConfig.GCSEnabled,
+			Output:     currentCfg.Output,
+		})
+		helper.SendTelegramNotification(helper.UploadTelegramRequest{
+			TelegramEnabled: currentCfg.ENVConfig.TelegramEnabled,
+			Output:          currentCfg.Output,
+			DBName:          currentCfg.DBName,
+			TelegramToken:   currentCfg.ENVConfig.TelegramToken,
+			TelegramChatID:  currentCfg.ENVConfig.TelegramChatID,
+		}, nil)
 
 		fmt.Printf("%s[System] Backup completed successfully!%s\n", constant.ColorGreen, constant.ColorReset)
 		return nil
@@ -72,7 +88,7 @@ func Run(cfg Config) error {
 				constant.ColorPurple, now.Format("2006-01-02 15:04:05"), constant.ColorReset)
 
 			currentCfg := cfg
-			currentCfg.Output = generateTimestampedOutput(cfg.Output, now)
+			currentCfg.Output = helper.GenerateTimestampedOutput(cfg.Output, now)
 
 			fmt.Printf("%s[Cron] Starting scheduled backup: %s%s\n",
 				constant.ColorBlue, currentCfg.Output, constant.ColorReset)
