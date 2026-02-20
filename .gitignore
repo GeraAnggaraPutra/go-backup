@@ -3,3 +3,5 @@
 *.sql
 .env
 backups
+credentials/
+/bin/

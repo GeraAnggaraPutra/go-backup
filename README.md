@@ -11,6 +11,7 @@ A robust and interactive CLI-based utility built with Go, designed to streamline
 - **Cron Job Integration**: Built-in support for scheduled backups using Cron expressions (e.g., `0 0 * * *` for daily midnight backups).
 - **Instant Telegram Notifications**: Receive real-time backup status reports (Success/Failure) directly to your Telegram account or group, complete with file details and timestamps.
 - **Real-time Management Dashboard**: A modern web interface to monitor live statistics, manage archives with batch operations, and track server disk capacity via a responsive, auto-refreshing UI.
+- **Cloud Persistence (GCS Integration)**: Automatically syncs your compressed backups to Google Cloud Storage for off-site redundancy and disaster recovery.
 
 ---
 
@@ -22,6 +23,7 @@ A robust and interactive CLI-based utility built with Go, designed to streamline
 4. **Execution**: The tool executes the dump process for the chosen tables.
 5. **Archiving**: The resulting data is bundled into a `.zip` file and moved to the designated output folder.
 6. **Notification**: Upon completion or if an error occurs mid-process, the bot dispatches a concise report using professional HTML formatting to Telegram.
+7. **Cloud Synchronization**: If enabled, the tool securely streams the ZIP archive to your configured Google Cloud Storage bucket, ensuring your data is safe even if the local server fails.
 ---
 
 ## 🛠️ Usage
@@ -47,10 +49,6 @@ DB_TABLES=table1,table2
 OUTPUT_FILE=backup.zip
 # Empty string means no schedule, otherwise use cron format
 SCHEDULE="0 0 * * *"
-
-# Telegram Notification (Optional)
-TELEGRAM_TOKEN=123456789:ABCDefghIJKLmn-Opqrst
-TELEGRAM_CHAT_ID=987654321
 ```
 
 ### Method 1: Running Manually (Go)
@@ -78,8 +76,8 @@ Docker is the recommended way to run the tool in production or environments with
 **1. Build and Run with Docker Compose**
 The project includes a `docker-compose.yml` that handles the setup, including volume mapping for your backup files.
 ```bash
-make docker-build
-make docker-backup
+make docker.build
+make docker.backup
 ```
 
 **2. Check Backups**
@@ -100,7 +98,7 @@ make dashboard
 make dashboard port=9000
 
 # Docker
-make docker-dashboard port=9000 (optional custom port)
+make docker.dashboard port=9000 (optional custom port)
 ```
 
 **2. Accessing the UI**

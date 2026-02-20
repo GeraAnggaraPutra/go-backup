@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -19,16 +18,6 @@ import (
 	"github.com/GeraAnggaraPutra/go-backup/internal/database"
 )
 
-func exitWithError(msg string, err error) {
-	if err != nil {
-		fmt.Printf("\n%s[Error] %s: %v%s\n", constant.ColorRed, msg, err, constant.ColorReset)
-	} else {
-		fmt.Printf("\n%s[Error] %s%s\n", constant.ColorRed, msg, constant.ColorReset)
-	}
-
-	os.Exit(1)
-}
-
 var rootCmd = &cobra.Command{
 	Use: "go-backup",
 }
@@ -38,45 +27,7 @@ var backupCmd = &cobra.Command{
 	Short:         "Database backup",
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("%s[System] Database Backup Tool Starting...%s\n", constant.ColorCyan, constant.ColorReset)
-		fmt.Printf("%s[System] Timezone: %s%s\n", constant.ColorCyan, time.Now().Format("2006-01-02 15:04:05 MST"), constant.ColorReset)
-
-		configSource := "Manual Input"
-		if _, err := os.Stat(".env"); err == nil {
-			prompt := &survey.Select{
-				Message: "Select configuration source:",
-				Options: []string{".env file", "Manual Input"},
-				Default: ".env file",
-			}
-
-			survey.AskOne(prompt, &configSource)
-		}
-
-		var cfg backup.Config
-		var err error
-
-		if configSource == ".env file" {
-			cfg, err = getConfigFromEnv()
-		} else {
-			cfg, err = getConfigFromInput()
-		}
-
-		if err != nil {
-			return err
-		}
-
-		err = backup.Run(cfg)
-		if err != nil {
-			if err == context.Canceled {
-				fmt.Printf("%s[System] Shutdown complete. Goodbye!%s\n", constant.ColorRed, constant.ColorReset)
-				return nil
-			}
-
-			return err
-		}
-		return nil
-	},
+	RunE:          runBackup,
 }
 
 func Execute() error {
@@ -84,14 +35,52 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-// Helper Functions
+func runBackup(cmd *cobra.Command, args []string) error {
+	printHeader()
+
+	configSource := ".env file"
+	if _, err := os.Stat(".env"); err == nil {
+		survey.AskOne(&survey.Select{
+			Message: "Select configuration source:",
+			Options: []string{".env file", "Manual Input"},
+			Default: ".env file",
+		}, &configSource)
+	} else {
+		configSource = "Manual Input"
+	}
+
+	var cfg backup.Config
+	var err error
+
+	if configSource == ".env file" {
+		cfg, err = getConfigFromEnv()
+	} else {
+		cfg, err = getConfigFromInput()
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if err := backup.Run(cfg); err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Printf("%s[System] Shutdown complete. Goodbye!%s\n", constant.ColorRed, constant.ColorReset)
+			return nil
+		}
+
+		return err
+	}
+
+	return nil
+}
+
 func getConfigFromEnv() (backup.Config, error) {
 	fmt.Printf("%s[System] Validating connection and tables from .env...%s\n", constant.ColorCyan, constant.ColorReset)
 
 	envConfig := config.LoadConfig()
 	driver := getDatabaseDriver(envConfig.DBType)
 
-	conn, err := connectToDatabase(driver, envConfig.DBHost, envConfig.DBPort, envConfig.DBUser, envConfig.DBPassword, envConfig.DBName)
+	conn, err := driver.Connect(envConfig.DBHost, envConfig.DBPort, envConfig.DBUser, envConfig.DBPassword, envConfig.DBName)
 	if err != nil {
 		exitWithError("Connection failed using .env credentials", err)
 	}
@@ -110,41 +99,24 @@ func getConfigFromEnv() (backup.Config, error) {
 		exitWithError("Table validation failed", err)
 	}
 
-	output := getOutputFile(envConfig.OutputFile)
-
 	fmt.Printf("%s[System] Validation successful. Starting backup...%s\n", constant.ColorGreen, constant.ColorReset)
 
 	return backup.Config{
-		DBType:    envConfig.DBType,
-		Host:      envConfig.DBHost,
-		Port:      envConfig.DBPort,
-		Username:  envConfig.DBUser,
-		Password:  envConfig.DBPassword,
-		DBName:    envConfig.DBName,
-		Output:    output,
-		Tables:    finalTables,
-		Schedule:  envConfig.Schedule,
-		ENVConfig: envConfig,
+		DBType: envConfig.DBType, Host: envConfig.DBHost, Port: envConfig.DBPort,
+		Username: envConfig.DBUser, Password: envConfig.DBPassword, DBName: envConfig.DBName,
+		Output: getOutputFile(envConfig.OutputFile), Tables: finalTables,
+		Schedule: envConfig.Schedule, ENVConfig: envConfig,
 	}, nil
 }
 
 func getConfigFromInput() (backup.Config, error) {
-	var (
-		dbType   string
-		host     string
-		port     int
-		username string
-		password string
-		dbName   string
-		envCfg   config.Config
-	)
+	var dbType, host, portStr, user, pass, dbName string
+	var envCfg config.Config
 
 	survey.AskOne(&survey.Select{
 		Message: "Select database type:",
 		Options: []string{"mysql", "postgres"},
-		Default: "mysql",
 	}, &dbType)
-
 	survey.AskOne(&survey.Input{
 		Message: "Host:",
 		Default: "127.0.0.1",
@@ -154,19 +126,19 @@ func getConfigFromInput() (backup.Config, error) {
 	if dbType == "postgres" {
 		defPort = "5432"
 	}
-	var portStr string
+
 	survey.AskOne(&survey.Input{
 		Message: "Port:",
 		Default: defPort,
 	}, &portStr)
-	port, _ = strconv.Atoi(portStr)
+	port, _ := strconv.Atoi(portStr)
 
-	survey.AskOne(&survey.Input{Message: "Username:"}, &username)
-	survey.AskOne(&survey.Password{Message: "Password:"}, &password)
+	survey.AskOne(&survey.Input{Message: "Username:"}, &user)
+	survey.AskOne(&survey.Password{Message: "Password:"}, &pass)
 	survey.AskOne(&survey.Input{Message: "Database name:"}, &dbName)
 
 	driver := getDatabaseDriver(dbType)
-	conn, err := connectToDatabase(driver, host, port, username, password, dbName)
+	conn, err := driver.Connect(host, port, user, pass, dbName)
 	if err != nil {
 		exitWithError("Failed to connect", err)
 	}
@@ -175,11 +147,7 @@ func getConfigFromInput() (backup.Config, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	allTables, err := driver.ListTables(ctx, conn)
-	if err != nil {
-		exitWithError("Failed to get tables", err)
-	}
-
+	allTables, _ := driver.ListTables(ctx, conn)
 	var selectedTables []string
 	survey.AskOne(&survey.MultiSelect{
 		Message: "Select tables:",
@@ -194,7 +162,6 @@ func getConfigFromInput() (backup.Config, error) {
 	survey.AskOne(&survey.Select{
 		Message: "Choose run mode:",
 		Options: []string{"Now (Once)", "Scheduled (Cron)"},
-		Default: "Now (Once)",
 	}, &runMode)
 
 	cronSchedule := ""
@@ -206,42 +173,43 @@ func getConfigFromInput() (backup.Config, error) {
 	}
 
 	var outputInput string
-	defaultOutput := time.Now().Format("20060102_150405") + "_backup.zip"
 	survey.AskOne(&survey.Input{
 		Message: "Output file:",
-		Default: defaultOutput,
+		Default: time.Now().Format("20060102_150405") + "_backup.zip",
 	}, &outputInput)
 
-	output := getOutputFile(outputInput)
-
-	sendTelegram := false
-	survey.AskOne(&survey.Confirm{
-		Message: "Send notification to Telegram?",
-		Default: false,
-	}, &sendTelegram)
-
-	if sendTelegram {
-		survey.AskOne(&survey.Input{
-			Message: "Telegram Token:",
-		}, &envCfg.TelegramToken)
-
-		survey.AskOne(&survey.Input{
-			Message: "Telegram Chat ID:",
-		}, &envCfg.TelegramChatID)
-	}
+	askTelegramPrompt(&envCfg)
+	askGCSPrompt(&envCfg)
 
 	return backup.Config{
-		DBType:    dbType,
-		Host:      host,
-		Port:      port,
-		Username:  username,
-		Password:  password,
-		DBName:    dbName,
-		Output:    output,
-		Tables:    selectedTables,
-		Schedule:  cronSchedule,
-		ENVConfig: envCfg,
+		DBType: dbType, Host: host, Port: port, Username: user, Password: pass, DBName: dbName,
+		Output: getOutputFile(outputInput), Tables: selectedTables,
+		Schedule: cronSchedule, ENVConfig: envCfg,
 	}, nil
+}
+
+func askTelegramPrompt(cfg *config.Config) {
+	send := false
+	survey.AskOne(&survey.Confirm{Message: "Send notification to Telegram?", Default: false}, &send)
+	if send {
+		survey.AskOne(&survey.Input{Message: "Telegram Token:"}, &cfg.TelegramToken)
+		survey.AskOne(&survey.Input{Message: "Telegram Chat ID:"}, &cfg.TelegramChatID)
+	}
+}
+
+func askGCSPrompt(cfg *config.Config) {
+	send := false
+	survey.AskOne(&survey.Confirm{Message: "Upload backup to Google Cloud Storage (GCS)?", Default: false}, &send)
+	if send {
+		cfg.GCSEnabled = true
+		survey.AskOne(&survey.Input{Message: "GCS Bucket Name:", Default: os.Getenv("GCS_BUCKET_NAME")}, &cfg.GCSBucketName)
+		survey.AskOne(&survey.Input{Message: "GCS Service Account File:", Default: "credentials-gcs.json"}, &cfg.GCSServiceAccountFile)
+	}
+}
+
+func printHeader() {
+	fmt.Printf("%s[System] Database Backup Tool Starting...%s\n", constant.ColorCyan, constant.ColorReset)
+	fmt.Printf("%s[System] Timezone: %s%s\n", constant.ColorCyan, time.Now().Format("2006-01-02 15:04:05 MST"), constant.ColorReset)
 }
 
 func getDatabaseDriver(dbType string) database.Database {
@@ -252,64 +220,58 @@ func getDatabaseDriver(dbType string) database.Database {
 	return &database.Postgres{}
 }
 
-func connectToDatabase(driver database.Database, host string, port int, user, password, dbName string) (*sql.DB, error) {
-	return driver.Connect(host, port, user, password, dbName)
-}
-
 func filterTables(existingTables []string, envTablesStr string) ([]string, error) {
 	if envTablesStr == "" {
 		if len(existingTables) == 0 {
-			return nil, errors.New("no tables found in database")
+			return nil, errors.New("no tables found")
 		}
-
 		return existingTables, nil
 	}
 
-	envTables := strings.Split(envTablesStr, ",")
 	tableMap := make(map[string]bool)
 	for _, t := range existingTables {
 		tableMap[t] = true
 	}
 
-	var finalTables []string
-	for _, et := range envTables {
+	var final []string
+	for _, et := range strings.Split(envTablesStr, ",") {
 		trimmed := strings.TrimSpace(et)
 		if trimmed == "" {
 			continue
 		}
-
 		if !tableMap[trimmed] {
-			return nil, fmt.Errorf("table '%s' from .env not found in database", trimmed)
+			return nil, fmt.Errorf("table '%s' not found", trimmed)
 		}
-
-		finalTables = append(finalTables, trimmed)
+		final = append(final, trimmed)
 	}
 
-	if len(finalTables) == 0 {
-		return nil, errors.New("no tables to backup")
-	}
-
-	return finalTables, nil
+	return final, nil
 }
 
 func getOutputFile(input string) string {
 	output := strings.TrimSpace(input)
-
 	if output == "" {
 		output = time.Now().Format("20060102_150405") + "_backup.zip"
 	}
 
 	if !strings.HasSuffix(strings.ToLower(output), ".zip") {
-		output = output + ".zip"
+		output += ".zip"
 	}
 
 	if !strings.HasPrefix(output, "backups/") {
 		output = "backups/" + output
 	}
 
-	if _, err := os.Stat("backups"); os.IsNotExist(err) {
-		_ = os.MkdirAll("backups", 0755)
+	_ = os.MkdirAll("backups", 0755)
+	return output
+}
+
+func exitWithError(msg string, err error) {
+	fmt.Printf("\n%s[Error] %s", constant.ColorRed, msg)
+	if err != nil {
+		fmt.Printf(": %v", err)
 	}
 
-	return output
+	fmt.Printf("%s\n", constant.ColorReset)
+	os.Exit(1)
 }

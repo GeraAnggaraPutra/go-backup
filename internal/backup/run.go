@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -15,7 +13,6 @@ import (
 	"github.com/GeraAnggaraPutra/go-backup/internal/config"
 	"github.com/GeraAnggaraPutra/go-backup/internal/constant"
 	"github.com/GeraAnggaraPutra/go-backup/internal/database"
-	"github.com/GeraAnggaraPutra/go-backup/internal/notification"
 	"github.com/GeraAnggaraPutra/go-backup/internal/zipper"
 
 	"github.com/robfig/cron/v3"
@@ -52,43 +49,13 @@ func Run(cfg Config) error {
 
 	processAction := func(currentCfg Config) error {
 		err := executeBackup(ctx, currentCfg)
-
-		finishTime := time.Now().Format("2006-01-02 15:04:05")
-		hasTele := currentCfg.ENVConfig.TelegramToken != "" && currentCfg.ENVConfig.TelegramChatID != ""
-
 		if err != nil {
-			if hasTele {
-				msg := fmt.Sprintf(constant.TelegramErrorTemplate,
-					currentCfg.DBName,
-					err.Error(),
-					finishTime,
-				)
-
-				if errNotif := notification.SendToTelegram(currentCfg.ENVConfig.TelegramToken, currentCfg.ENVConfig.TelegramChatID, "", msg); errNotif != nil {
-					fmt.Printf("\n%s[Notification] Failed to send Telegram error notification: %v%s\n", constant.ColorRed, errNotif, constant.ColorReset)
-				} else {
-					fmt.Printf("%s[Notification] Error notification sent to Telegram successfully!%s\n", constant.ColorGreen, constant.ColorReset)
-				}
-			}
-
+			sendTelegramNotification(currentCfg, err)
 			return err
 		}
 
-		if hasTele {
-			fileNameOnly := filepath.Base(currentCfg.Output)
-
-			msg := fmt.Sprintf(constant.TelegramMessageTemplate,
-				currentCfg.DBName,
-				fileNameOnly,
-				finishTime,
-			)
-
-			if errNotif := notification.SendToTelegram(currentCfg.ENVConfig.TelegramToken, currentCfg.ENVConfig.TelegramChatID, currentCfg.Output, msg); errNotif != nil {
-				fmt.Printf("\n%s[Notification] Failed to send Telegram: %v%s\n", constant.ColorRed, errNotif, constant.ColorReset)
-			} else {
-				fmt.Printf("%s[Notification] Backup sent to Telegram successfully!%s\n", constant.ColorGreen, constant.ColorReset)
-			}
-		}
+		uploadToGCS(ctx, currentCfg)
+		sendTelegramNotification(currentCfg, nil)
 
 		fmt.Printf("%s[System] Backup completed successfully!%s\n", constant.ColorGreen, constant.ColorReset)
 		return nil
@@ -136,10 +103,12 @@ func Run(cfg Config) error {
 		fmt.Printf("%s[Cron] Stopping scheduler...%s\n", constant.ColorYellow, constant.ColorReset)
 
 		stopCtx := c.Stop()
-		<-stopCtx.Done()
-
-		fmt.Printf("%s[Cron] Scheduler stopped. Exiting application.%s\n", constant.ColorGreen, constant.ColorReset)
-		fmt.Printf("%s[System] Shutdown complete. Goodbye!%s\n", constant.ColorRed, constant.ColorReset)
+		select {
+		case <-stopCtx.Done():
+			fmt.Printf("%s[Cron] Scheduler stopped cleanly.%s\n", constant.ColorGreen, constant.ColorReset)
+		case <-time.After(5 * time.Second):
+			fmt.Printf("%s[Cron] Stop timeout reached. Forcing exit.%s\n", constant.ColorRed, constant.ColorReset)
+		}
 
 		return nil
 	}
@@ -248,50 +217,4 @@ type writerFunc func(int)
 func (f writerFunc) Write(p []byte) (int, error) {
 	f(len(p))
 	return len(p), nil
-}
-
-// checks if the string matches the YYYYMMDD_HHMMSS pattern
-func isDefaultTimestamp(s string) bool {
-	if len(s) < 15 {
-		return false
-	}
-	for i, r := range s {
-		if i == 8 { // The underscore position
-			if r != '_' {
-				return false
-			}
-			continue
-		}
-
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-
-	return true
-}
-
-func generateTimestampedOutput(originalOutput string, now time.Time) string {
-	timestamp := now.Format("20060102_150405")
-
-	// Separate folder path and file name
-	pathSeparatorIdx := strings.LastIndex(originalOutput, "/")
-	folderPath := ""
-	fileName := originalOutput
-
-	if pathSeparatorIdx != -1 {
-		folderPath = originalOutput[:pathSeparatorIdx+1] // example: "backups/"
-		fileName = originalOutput[pathSeparatorIdx+1:]   // example: "backup.zip"
-	}
-
-	// If the file name starts with a default timestamp pattern, remove it before adding the new timestamp
-	if len(fileName) >= 16 && isDefaultTimestamp(fileName[:15]) {
-		parts := strings.SplitN(fileName, "_", 3)
-		if len(parts) >= 3 {
-			fileName = parts[2]
-		}
-	}
-
-	// Construct the new output path with the current timestamp
-	return fmt.Sprintf("%s%s_%s", folderPath, timestamp, fileName)
 }

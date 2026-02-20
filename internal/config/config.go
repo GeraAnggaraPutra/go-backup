@@ -8,17 +8,21 @@ import (
 )
 
 type Config struct {
-	DBType         string
-	DBHost         string
-	DBPort         int
-	DBUser         string
-	DBPassword     string
-	DBName         string
-	DBTables       string
-	OutputFile     string
-	Schedule       string
-	TelegramToken  string
-	TelegramChatID string
+	DBType                string
+	DBHost                string
+	DBPort                int
+	DBUser                string
+	DBPassword            string
+	DBName                string
+	DBTables              string
+	OutputFile            string
+	Schedule              string
+	TelegramEnabled       bool
+	TelegramToken         string
+	TelegramChatID        string
+	GCSEnabled            bool
+	GCSBucketName         string
+	GCSServiceAccountFile string
 }
 
 func LoadConfig() (cfg Config) {
@@ -33,8 +37,10 @@ func LoadConfig() (cfg Config) {
 	cfg.DBTables = getEnv("DB_TABLES")
 	cfg.OutputFile = getEnv("OUTPUT_FILE")
 	cfg.Schedule = getEnv("SCHEDULE")
+	cfg.TelegramEnabled = getEnvAsBool("TELEGRAM_ENABLED")
 	cfg.TelegramToken = getEnv("TELEGRAM_TOKEN")
 	cfg.TelegramChatID = getEnv("TELEGRAM_CHAT_ID")
+	cfg.GCSEnabled = getEnvAsBool("GCS_ENABLED")
 
 	return
 }
@@ -55,4 +61,14 @@ func getEnvAsInt(key string) int {
 	}
 
 	return 0
+}
+
+func getEnvAsBool(key string) bool {
+	if valueStr, exists := os.LookupEnv(key); exists {
+		if value, err := strconv.ParseBool(valueStr); err == nil {
+			return value
+		}
+	}
+
+	return false
 }
